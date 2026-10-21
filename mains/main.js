@@ -1,42 +1,130 @@
-const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, screen, nativeTheme, dialog, nativeImage } = require('electron');
+const { getPalette } = require('../shared/theme');
 const path = require('path');
 const fs = require('fs');
-const { loadFolder, saveAppData, truncateFilePathToNearestFolder, loadData, loadIndex } = require('./main-functions');
+const crypto = require('crypto');
+const { pathToFileURL } = require('url');
+const { loadFolder, saveAppData, loadData, loadIndex, getFolderPaths, selectFolderPath, removeFolderPath } = require('./main-functions');
+const { readMediaMetadata } = require('./media-metadata');
+const { createThumbnailCache } = require('./thumbnail-cache');
 
 global.preferencesData = loadData();
 
+function getBackgroundColor() {
+  return getPalette(global.preferencesData.backgroundColor).background;
+}
+
+function getTextColor(color) {
+  return getPalette(color).text;
+}
+
+function refreshWindowMaterial(window) {
+  window.setBackgroundColor('#00000000');
+  if (process.platform === 'win32') window.setBackgroundMaterial('acrylic');
+}
+
 function createWindow() {
+  nativeTheme.themeSource = 'dark';
+  const workArea = screen.getPrimaryDisplay().workAreaSize;
+  const backgroundColor = getBackgroundColor();
   const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: Math.min(1440, Math.floor(workArea.width * 0.92)),
+    height: Math.min(960, Math.floor(workArea.height * 0.92)),
+    center: true,
     icon: 'app-icons/logo.png',
     webPreferences: {
       nodeIntegration: true,
       audio: true,
-      zoomFactor: 0.01,
+      zoomFactor: 0.25,
       preload: path.join(__dirname, 'preload.js'),
     },
-    frame: false,
+    frame: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: backgroundColor, symbolColor: getTextColor(backgroundColor), height: 48 },
+    backgroundColor: '#00000000',
+    backgroundMaterial: 'acrylic',
   });
 
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.once('ready-to-show', () => refreshWindowMaterial(mainWindow));
+
   mainWindow.webContents.on('did-finish-load', () => {
-    mainWindow.webContents.setZoomFactor(.01); 
+    mainWindow.webContents.setZoomFactor(.25);
+    // Reapply after navigation so Chromium's page background cannot cover DWM.
+    refreshWindowMaterial(mainWindow);
   });
 
   loadIndex(mainWindow);
 
-  /* Functions for handling window min/max/close */
-  ipcMain.on('closeApp', () => {
-    app.quit();
+  ipcMain.handle('add-photo-folders', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '添加照片文件夹', properties: ['openDirectory', 'multiSelections'],
+      defaultPath: global.preferencesData.folderLocation
+    });
+    if (result.canceled || !result.filePaths.length) return null;
+    return selectFolderPath(result.filePaths[0], result.filePaths);
   });
-  ipcMain.on('minimizeApp', () => {
-    mainWindow.minimize();
+  ipcMain.handle('select-photo-folder', async (_event, folderPath) => {
+    if (!getFolderPaths().includes(folderPath)) throw new Error('文件夹不在列表中');
+    if (!(await fs.promises.stat(folderPath)).isDirectory()) throw new Error('文件夹不存在');
+    return selectFolderPath(folderPath);
   });
-  ipcMain.on('maximizeApp', () => {
-    if (mainWindow.isMaximized())
-      mainWindow.restore();
-    else
-      mainWindow.maximize();
+  ipcMain.handle('read-media-metadata', (_event, filePath) => readMediaMetadata(filePath));
+  ipcMain.handle('remove-photo-folder', (_event, folderPath) => removeFolderPath(folderPath));
+  const thumbnailCache = createThumbnailCache(path.join(app.getPath('userData'), 'thumbnail-cache'));
+  ipcMain.handle('get-thumbnail-cache-info', () => thumbnailCache.info());
+  ipcMain.handle('clear-thumbnail-cache', () => thumbnailCache.clear());
+  ipcMain.handle('get-image-thumbnail', (_event, filePath) => thumbnailCache.run(async () => {
+    const stats = await fs.promises.stat(filePath);
+    if (!stats.isFile()) throw new Error('图片文件不存在');
+
+    const cacheDir = path.join(app.getPath('userData'), 'thumbnail-cache');
+    await fs.promises.mkdir(cacheDir, { recursive: true });
+    const normalizedPath = path.resolve(filePath);
+    const cacheKey = crypto.createHash('sha1').update(process.platform === 'win32' ? normalizedPath.toLowerCase() : normalizedPath).digest('hex');
+    const jpegSource = /\.(jpe?g|jfif)$/i.test(filePath);
+    const thumbnailPath = path.join(cacheDir, cacheKey + (jpegSource ? '.jpg' : '.png'));
+    const metadataPath = path.join(cacheDir, cacheKey + '.json');
+    const sourceInfo = { size: stats.size, modifiedAt: stats.mtimeMs };
+
+    try {
+      const cachedInfo = JSON.parse(await fs.promises.readFile(metadataPath, 'utf8'));
+      await fs.promises.access(thumbnailPath, fs.constants.R_OK);
+      if (cachedInfo.size === sourceInfo.size && cachedInfo.modifiedAt === sourceInfo.modifiedAt) {
+        return pathToFileURL(thumbnailPath).href;
+      }
+    } catch {}
+
+    let thumbnail;
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      thumbnail = await nativeImage.createThumbnailFromPath(filePath, { width: 640, height: 640 });
+    } else {
+      thumbnail = nativeImage.createFromPath(filePath).resize({ width: 640, height: 640, quality: 'good' });
+    }
+    if (thumbnail.isEmpty()) throw new Error('无法生成图片缩略图');
+    const temporaryImage = thumbnailPath + '.tmp';
+    const temporaryMetadata = metadataPath + '.tmp';
+    await fs.promises.writeFile(temporaryImage, jpegSource ? thumbnail.toJPEG(82) : thumbnail.toPNG());
+    await fs.promises.writeFile(temporaryMetadata, JSON.stringify(sourceInfo));
+    await fs.promises.rename(temporaryImage, thumbnailPath);
+    await fs.promises.rename(temporaryMetadata, metadataPath);
+    return pathToFileURL(thumbnailPath).href;
+  }));
+
+  ipcMain.handle('set-background-color', (_event, color) => {
+    if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) {
+      throw new Error('背景颜色格式无效');
+    }
+    const previous = global.preferencesData.backgroundColor;
+    global.preferencesData.backgroundColor = color.toLowerCase();
+    try {
+      saveAppData();
+    } catch (error) {
+      global.preferencesData.backgroundColor = previous;
+      throw error;
+    }
+    mainWindow.setTitleBarOverlay({ color, symbolColor: getTextColor(color), height: 48 });
+    return global.preferencesData.backgroundColor;
   });
   mainWindow.on('enter-full-screen', () => {
     mainWindow.webContents.send('enter-full-screen'); 
@@ -52,6 +140,7 @@ function createWindow() {
 
   /* Handler for when image is dropped. Relocates file from one folder to another. */
   ipcMain.on('imageDropped', async (event, imagePath) => {
+    if (!global.preferencesData.folderLocation) return;
     const destinationFilePath = path.join(global.preferencesData.folderLocation, path.basename(imagePath));
 
     if (fs.existsSync(destinationFilePath)) return;
@@ -82,22 +171,16 @@ function createWindow() {
 
 app.whenReady().then(() => {
   
-  // Access command-line arguments using process.argv
-  const args = process.argv;
-  arg = truncateFilePathToNearestFolder(args[args.length - 1]);
-  if (arg != null) 
-  {
-    // Check if the path exists
-    fs.access(arg, fs.constants.F_OK, (err) => {
-      if (err) {
-        console.error(`The path ${arg} does not exist.`);
-      } else {
-        // Convert to the desired format for json serialization
-        const convertedPath = arg.replace(/\//g, '\\');
-        global.preferencesData.folderLocation = convertedPath;
-        saveAppData();
-      }
-    });
+  // The application entry script is not a user-selected photo folder.
+  const launchPath = process.argv.slice(app.isPackaged ? 1 : 2).find(value => value && !value.startsWith('-'));
+  if (launchPath) {
+    try {
+      const resolved = path.resolve(launchPath);
+      const stat = fs.statSync(resolved);
+      selectFolderPath(stat.isDirectory() ? resolved : path.dirname(resolved));
+    } catch (error) {
+      console.error('无法打开启动路径:', error.message);
+    }
   }
 
   var browserWindow = createWindow();
@@ -108,7 +191,7 @@ app.whenReady().then(() => {
 
 
   ipcMain.handle('loadAppData', () => {
-    return loadData();
+    return { ...loadData(), folderPaths: getFolderPaths() };
   });
 
   app.on('activate', function () {
@@ -117,6 +200,7 @@ app.whenReady().then(() => {
 });
 
 ipcMain.handle('readFilesFromDisk', async (event, filePath) => {
+  if (!filePath) return [];
   // Assuming fileList is an array of file names without dates
   const updatedFileList = [];
   try {

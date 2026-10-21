@@ -1,9 +1,23 @@
-function addImage(file) {
-  const gridItem = createImage(file);
-  gridItem.style.visibility = "visible";
-  if (gridItem == undefined) return;
-  grid.appended(gridItem);
-  refreshGridLayout();
+// Bound decoding work so large folders do not decode every full-size photo at once.
+const mediaLoadQueue = [];
+let activeMediaLoads = 0;
+function queueMediaLoad(start) {
+  mediaLoadQueue.push(start);
+  pumpMediaLoads();
+}
+function pumpMediaLoads() {
+  while (activeMediaLoads < 4 && mediaLoadQueue.length) {
+    activeMediaLoads++;
+    const start = mediaLoadQueue.shift();
+    start(() => {
+      activeMediaLoads--;
+      pumpMediaLoads();
+    });
+  }
+}
+
+function updateFolderSidebar() {
+  renderFolderLibrary();
 }
 
 function createImage(file) {
@@ -16,16 +30,22 @@ function createImage(file) {
   // Create div element
   const gridItem = document.createElement('div');
   gridItem.className = 'grid-item';
+  const card = document.createElement('div');
+  card.className = 'grid-card is-loading';
+  card.setAttribute('aria-busy', 'true');
+  card.style.width = `${calc_width()}px`;
+  card.style.transform = `scale(${currentPadding})`;
+  gridItem.appendChild(card);
 
   let imgElement;
   const imgPath = file.fullPath;
+  const mediaUrl = window.electronAPI.fileUrl(imgPath);
   //console.log(file.isImage);
   if (file.isImage === true)
   {
     // Create img element
     imgElement = document.createElement('img');
     //imgElement.loading = "lazy";
-    imgElement.src = imgPath;
     imgElement.id = imgPath;
     imgElement.className = "grid-image";
 
@@ -36,15 +56,7 @@ function createImage(file) {
         focusImgVideoWrapper.classList.remove('show');
         return;
       }
-      // You can perform operations on the clickedImage here
-      focusImgVideoWrapper.classList.add('show');
-      focusImg.src = imgPath;
-      focusImg.classList.add('show')
-      backButton.classList.remove('hide');
-      resetFocusImgButton.classList.remove('hide');
-
-      panZoomInstance = panzoom(zoomPanHolder);
-      resetPanZoom(focusImg.naturalWidth, focusImg.naturalHeight);
+      openFocusedImage(imgElement, mediaUrl, imgPath);
     });
   }
   else
@@ -55,20 +67,24 @@ function createImage(file) {
     imgElement.loop = true;
     imgElement.className = "grid-image";
     const sourceElement = document.createElement(`source`);
-    sourceElement.src = imgPath;
     sourceElement.id = imgPath;
     imgElement.appendChild(sourceElement);
-    const audioA = document.createElement(`a`);
+    const audioA = document.createElement('button');
+    audioA.type = 'button';
+    audioA.setAttribute('aria-label', '取消静音');
+    audioA.setAttribute('aria-pressed', 'false');
+    audioA.appendChild(GalleryIcons.create('VolumeX'));
     audioA.classList.add(`audio-button`);
     audioA.classList.add(`overlay-circle-button`);
-    gridItem.appendChild(audioA);
+    card.appendChild(audioA);
     
     // Mute function
     audioA.addEventListener('click', () => {
       if (focusImgVideoWrapper.classList.contains('show')) return;
       imgElement.muted = !imgElement.muted;
-      if (imgElement.muted) audioA.classList.remove(`unmute`);
-      else audioA.classList.add(`unmute`);
+      audioA.replaceChildren(GalleryIcons.create(imgElement.muted ? 'VolumeX' : 'Volume2'));
+      audioA.setAttribute('aria-label', imgElement.muted ? '取消静音' : '静音');
+      audioA.setAttribute('aria-pressed', String(!imgElement.muted));
     });
 
     // Add full screen click event
@@ -78,33 +94,69 @@ function createImage(file) {
         focusImgVideoWrapper.classList.remove('show');
         return;
       }
-      // Clear all img settings
-      focusImg.src = '';
-      zoomPanHolder.style.transformOrigin = `0px 0px 0px`;
-      zoomPanHolder.style.transform = `inherit`;
-
-      let zooming = document.body.style.zoom = 1;
-
-      // You can perform operations on the clickedImage here
-      focusImgVideoWrapper.classList.add('show');
-      focusVideo.querySelector('source').src = imgPath;
-      focusVideo.load();
-      muteButtonFocus.classList.remove(`hide`);
-      backButton.classList.remove('hide');
-      // Sync settings
-      focusVideo.currentTime = imgElement.currentTime;
-      focusVideo.muted = imgElement.muted;
-      if (focusVideo.muted) muteButtonFocus.classList.remove(`unmute`);
-      else muteButtonFocus.classList.add(`unmute`);
-      // Pause original because focus is playing
-      imgElement.muted = true;
-      imgElement.pause();
-      audioA.classList.remove(`unmute`);
+      openFocusedVideo(imgElement, mediaUrl, imgPath);
     });
   }
 
   // Nest within div
-  gridItem.appendChild(imgElement);
+  card.appendChild(imgElement);
+
+  // Keep partially downloaded images hidden until decoding has finished.
+  gridItem.mediaReady = new Promise(resolve => queueMediaLoad(release => {
+    if (gridItem.cancelled) {
+      resolve();
+      release();
+      return;
+    }
+    let settled = false;
+    const finish = (failed = false) => {
+      if (settled) return;
+      settled = true;
+      card.classList.remove('is-loading');
+      card.setAttribute('aria-busy', 'false');
+      if (failed) {
+        card.classList.add('load-error');
+        const message = document.createElement('span');
+        message.className = 'media-load-error';
+        message.textContent = '加载失败';
+        card.appendChild(message);
+      }
+      if (grid && !gridItem.cancelled) grid.layout();
+      resolve();
+      release();
+    };
+    gridItem.cancelMediaLoad = () => {
+      imgElement.removeAttribute('src');
+      if (!file.isImage) {
+        imgElement.pause();
+        imgElement.querySelector('source').removeAttribute('src');
+        imgElement.load();
+      }
+      finish();
+    };
+    imgElement.addEventListener('error', () => finish(true), { once: true });
+    if (file.isImage) {
+      imgElement.addEventListener('load', async () => {
+        try {
+          await imgElement.decode();
+          finish();
+        } catch {
+          // Animated images and usable images may reject decode(); load plus
+          // valid natural dimensions still means the browser can display them.
+          finish(!(imgElement.complete && imgElement.naturalWidth > 0));
+        }
+      }, { once: true });
+      window.electronAPI.getImageThumbnail(imgPath).then(thumbnailUrl => {
+        if (!gridItem.cancelled) imgElement.src = thumbnailUrl;
+      }).catch(() => finish(true));
+    } else {
+      imgElement.addEventListener('loadeddata', () => finish(), { once: true });
+      const source = imgElement.querySelector('source');
+      source.addEventListener('error', () => finish(true), { once: true });
+      source.src = mediaUrl;
+      imgElement.load();
+    }
+  }));
 
   // Add to grid
   imageGrid.appendChild(gridItem);
@@ -112,165 +164,130 @@ function createImage(file) {
   return gridItem;
 }
 
-// Initialization
-function setupImagesInGrid() {
-  ipcRend.invoke('readFilesFromDisk', preferencesData.folderLocation).then(files => {
-    console.log(`${preferencesData.folderLocation}`);
-  
-    resortAfterImageLoad = false;
-  
-    grid = new Masonry('.grid', {
-      itemSelector: '.grid-item',
-      gutter: 0,
-    });
-    
-    allFiles = files;
-    allFiles = resort(allFiles);
-    handle_resort(allFiles);
-    loadImages(allFiles);
-  
-    setTimeout(() => { updateGridAndSpacing(); grid.layout(); }, 100);
-  }).catch(err => {
-    console.error('Error reading image folder:', err);
-  });
+// Only create media elements for the current page; the remaining list is metadata.
+const IMAGE_BATCH_SIZE = 20;
+let pendingFiles = [];
+let batchInProgress = false;
+let currentBatchPromise = null;
+let galleryVersion = 0;
+let loadCallStack = 0;
+let lastGalleryScrollTop = 0;
+
+function updateGalleryFooter() {
+  if (!allFiles || !grid) return;
+  const count = imageGrid.querySelectorAll('.grid-item').length;
+  const status = document.getElementById('gallery-status');
+  const button = document.getElementById('load-more-images');
+  status.textContent = batchInProgress
+    ? '正在加载下一批…'
+    : count + ' / ' + allFiles.length + ' 项' + (pendingFiles.length ? ' · 滑到底部继续加载' : ' · 已全部加载');
+  button.hidden = pendingFiles.length === 0;
+  button.disabled = batchInProgress;
+  button.textContent = batchInProgress ? '加载中…' : '加载下 ' + Math.min(IMAGE_BATCH_SIZE, pendingFiles.length) + ' 项';
+  // Masonry's CSS transform enlarges its visible height without changing flow.
+  imageGrid.style.marginBottom = Math.max(0, imageGrid.getBoundingClientRect().height - imageGrid.offsetHeight) + 48 + 'px';
+  updateHeaderCounter();
 }
 
-// Lazy loads images. Does so with a bit of a delays
-let loadCallStack = 0;
-async function loadImages(input_files) {
-  const cached_files = [...input_files];
+function resetGallery(files) {
+  if (typeof resetBoundaryScroll === 'function') resetBoundaryScroll();
+  galleryVersion++;
+  const items = [...imageGrid.querySelectorAll('.grid-item')];
+  items.forEach(item => { item.cancelled = true; });
+  items.forEach(item => { if (item.cancelMediaLoad) item.cancelMediaLoad(); });
+  imageGrid.replaceChildren();
+  grid.reloadItems();
+  allFiles = resort([...files]);
+  pendingFiles = [...allFiles];
+  batchInProgress = false;
+  currentBatchPromise = null;
+  updateFolderSidebar();
+  document.getElementById('header-folder-path').textContent = preferencesData.folderLocation;
+  document.getElementById('folder-path').textContent = preferencesData.folderLocation || '';
+  document.getElementById('no-items-message').textContent = preferencesData.folderLocation ? '此文件夹暂无可显示的照片：' : '还没有文件夹，点击左侧添加文件夹开始浏览。';
+  document.getElementById('no-items-text').classList.toggle('show', allFiles.length === 0);
+  window.scrollTo(0, 0);
+  lastGalleryScrollTop = 0;
+  updateGridAndSpacing();
+  grid.layout();
+  updateGalleryFooter();
+  return loadNextBatch();
+}
 
-  updateHeaderCounter();
-  noItemsEl = document.getElementById(`no-items-text`);
-  headerPathEl = document.getElementById(`header-folder-path`);
-  headerPathEl.innerHTML = preferencesData.folderLocation;
-  if (cached_files.length == 0)
-  {
-    if (allFiles.length == 0)
-    {
-      noItemsEl.classList.add("show");
-      pathEl = document.getElementById(`folder-path`);
-      pathEl.innerHTML = preferencesData.folderLocation;
-    }
-    return;
+function loadNextBatch() {
+  if (batchInProgress) return currentBatchPromise;
+  if (!grid || !pendingFiles.length) return Promise.resolve();
+  const version = galleryVersion;
+  const batch = pendingFiles.splice(0, IMAGE_BATCH_SIZE);
+  batchInProgress = true;
+  updateGalleryFooter();
+  currentBatchPromise = loadImages(batch, version).finally(() => {
+    if (version !== galleryVersion) return;
+    batchInProgress = false;
+    currentBatchPromise = null;
+    updateGalleryFooter();
+  });
+  return currentBatchPromise;
+}
+
+async function setupImagesInGrid() {
+  grid = new Masonry('.grid', { itemSelector: '.grid-item', gutter: 0 });
+  grid.on('layoutComplete', updateGalleryFooter);
+  updateFolderSidebar();
+  try {
+    const files = await ipcRend.invoke('readFilesFromDisk', preferencesData.folderLocation);
+    await resetGallery(files);
+  } catch {
+    await resetGallery([]);
+    document.getElementById('folder-library-status').textContent = '无法读取当前文件夹，请重新选择或添加文件夹。';
   }
-  noItemsEl.classList.remove("show");
+}
 
+async function loadImages(files, version) {
   loadCallStack++;
   updateLoadingIcon();
-
-  function waitForResourcesToLoad(elements) {
-    const promises = [];
-    for (const element of elements) {
-      if (!element || element.complete) continue;
-      promises.push(new Promise(resolve => {
-        element.onload = resolve;
-        element.onerror = resolve;
-        if (element.complete) resolve();
-        setTimeout(resolve, 200);
-      }));
-    }
-    return Promise.all(promises);
-  }
-
-  let iter = 0;
-  let lastProcessTime = Date.now();
-  let batchItems = [];
-
-  const processBatch = async (animate = false) => {
-    console.debug('Processing batch of', batchItems.length, 'items (animate:', animate, ')');
-    
-    let currentBatch = batchItems;
-    batchItems = [];
-
-    // Wait for all images in the batch to load
-    await waitForResourcesToLoad(currentBatch.map(gridItem => gridItem.querySelector('img, video')));
-
-    // Wait for the batch to be processed (with a timeout)
-    await new Promise(resolve => {
-      grid.once('layoutComplete', resolve);
-
-      // Add the batch to the grid
-      if (animate) {
-        for (const gridItem of currentBatch)
-          gridItem.style.visibility = 'visible';
-        grid.appended(currentBatch);
-      } else {
-        grid.addItems(currentBatch);
-        grid.layout();
-      }
-
-      setTimeout(resolve, 100);
-    });
-
-    if (!animate)
-      for (const gridItem of currentBatch)
-        gridItem.style.visibility = 'visible';
-  };
-
-  const initialBatchSize = 50;
-  const fastBatchSizeLimit = 20;
-  const processUpdateDelay = 1000 / 60;
-  let batchSize = initialBatchSize;
-
-  console.time('loadImages');
-
-  for (const file of cached_files) {
-    const gridItem = createImage(file);
-    if (gridItem == undefined) continue;
-
-    const loadSpeed = preferencesData.loadSpeed || 'fast';
-    const loadDelay = {
-      'medium': 0,
-      'slow': 100,
-    }[loadSpeed];
-
-    if (loadSpeed.startsWith('fast')) { // Fastest / Fast
-      gridItem.style.visibility = 'hidden';
-      batchItems.push(gridItem);
-
-      iter++;
-      if (batchItems.length >= batchSize || Date.now() - lastProcessTime > processUpdateDelay) {
-        batchSize = Math.min(Math.max(batchItems.length * 4, initialBatchSize), 2000);
-        await processBatch(loadSpeed !== 'fastest');
-        lastProcessTime = Date.now();
-      }
-
-      if (loadSpeed === 'fast') batchSize = Math.min(batchSize, fastBatchSizeLimit);
-
-    } else {
-      if (batchItems.length > 0) await processBatch();
-
-      grid.appended(gridItem);
-      if (loadDelay !== 0 || iter % 10 === 0 || Date.now() - lastProcessTime > processUpdateDelay) {
-        grid.layout();
-        await new Promise(resolve => setTimeout(resolve, loadDelay));
-        lastProcessTime = Date.now();
+  const items = [];
+  try {
+    for (const file of files) {
+      if (version !== galleryVersion) break;
+      const item = createImage(file);
+      if (!item) continue;
+      items.push(item);
+      if (preferencesData.loadSpeed === 'slow') {
+        grid.appended(item);
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
+    if (version !== galleryVersion) return;
+    if (preferencesData.loadSpeed !== 'slow') grid.appended(items);
+    updateGridAndSpacing();
+    grid.layout();
+    await Promise.all(items.map(item => item.mediaReady));
+    if (version !== galleryVersion) return;
+    items.forEach(item => item.querySelector('.grid-image').classList.add('shown'));
+    grid.layout();
+  } finally {
+    loadCallStack--;
+    updateLoadingIcon();
   }
-  if (batchItems.length > 0) await processBatch();
-  
-  // Wait for all images to load before triggering Masonry Layout
-  await waitForResourcesToLoad(imageGrid.querySelectorAll('img, video'));
-  grid.layout();
-
-  console.timeEnd('loadImages');
-
-  // Show done pop up
-  loadCallStack--;
-  updateLoadingIcon();
-  
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  for (const file of cached_files) {
-    // Only generate a new element and append it if it doesn't already exist
-    const existingEl = document.getElementById(`${file.name}`);
-    if (existingEl != null) existingEl.classList.add("shown");
-  }
-
-  if (resortAfterImageLoad) handle_resort(allFiles);
-  resortAfterImageLoad = false;
 }
+
+function loadMoreAtBottom() {
+  if (!grid || batchInProgress || !pendingFiles.length || focusImgVideoWrapper.classList.contains('show')) return;
+  const scroller = document.scrollingElement;
+  if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 32) loadNextBatch();
+}
+
+window.addEventListener('scroll', () => {
+  const top = document.scrollingElement.scrollTop;
+  const movingDown = top > lastGalleryScrollTop;
+  lastGalleryScrollTop = top;
+  if (movingDown) loadMoreAtBottom();
+}, { passive: true });
+gridWrapper.addEventListener('wheel', event => {
+  if (event.deltaY > 0 && !event.ctrlKey && !event.shiftKey) loadMoreAtBottom();
+}, { passive: true });
+document.getElementById('load-more-images').addEventListener('click', loadNextBatch);
 
 function is_an_image_focused() {
   return focusImg.classList.contains('show');

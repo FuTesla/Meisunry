@@ -1,29 +1,30 @@
 // Functions for updating the width, scale, and spacing
 function updateGridAndSpacing() {
-  const gridItems = document.querySelectorAll('.grid-image');
+  const gridItems = document.querySelectorAll('.grid-card');
   // Get new width
   width = calc_width();
   gridItems.forEach(item => {
     item.style.maxWidth = `${width}px`;
     item.style.minWidth = `${width}px`;
+    item.style.width = `${width}px`;
     item.style.transform = `scale(${currentPadding})`;
     // You can adjust other styling properties as needed
   });
   imageGrid.style.transform = `scale(${get_transform_correction_scale()})`;
+  const columns = Math.max(1, Math.floor(gridWrapper.clientWidth / width));
+  imageGrid.style.width = `${width * columns}px`;
   imageGrid.style.marginTop = `${(1-currentPadding)*width}px`;
 }
 
 function calc_width() {
-  originalWidth = (500 * currentZoom);
-  return originalWidth;
+  return Math.min(500 * currentZoom, Math.max(1, gridWrapper.clientWidth));
 }
 
 function get_transform_correction_scale() {
-  originalWidth = (500 * currentZoom);
-  itemsCount = Math.floor((document.body.clientWidth / originalWidth));
-  actualPresentedWidth = originalWidth * itemsCount;
-  transformScale = (document.body.clientWidth / actualPresentedWidth);
-  return transformScale;
+  const originalWidth = calc_width();
+  const availableWidth = Math.max(1, gridWrapper.clientWidth);
+  const itemsCount = Math.max(1, Math.floor(availableWidth / originalWidth));
+  return availableWidth / (originalWidth * itemsCount);
 }
 
 function resort(files) {
@@ -78,7 +79,7 @@ function handle_resort(cached_files) {
   cached_files.reverse().forEach(file => {
     const imgElement = document.getElementById(`${file.fullPath}`);
     if (imgElement == null) return;
-    const divElement = imgElement.parentElement;
+    const divElement = imgElement.closest('.grid-item');
     const parentElement = divElement.parentElement;
     parentElement.insertBefore(divElement, parentElement.firstChild);
   });

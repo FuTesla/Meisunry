@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
   <title>Electron Photo Display with Masonry Layout</title>
   <!-- Include the Masonry Layout CSS -->
   <link rel="stylesheet" type="text/css" href="stylesheet.css">
@@ -15,63 +16,104 @@
                 <div style="width: 15px"></div>
                 <span id="header-folder-path" class="header-browsing-text"></span>
               <div class="right-top-bar">
-                <!-- Render SVG using embed tag -->
-                <embed id="load-icon" class="svg-background" type="image/svg+xml" src="../app-icons/load.svg" width="65" height="65">
+                <i data-icon="LoaderCircle" id="load-icon" class="svg-background icon-spin"></i>
                   <span id="header-image-count">0 Images</span>
               </div>
             </div>
           </div>
-          <div class="titleBarBtns">
-            <button id="minimizeBtn" class="topBtn minimizeBtn"></button>
-            <button id="maxResBtn" class="topBtn maximizeBtn"></button>
-            <button id="closeBtn" class="topBtn closeBtn"></button>
-          </div>
         </div>
       </div>
-      
-      <!-- Focused element buttons -->
-      <div class="right-focus-buttons-container focus-buttons-container">
-        <a id="mute-button-focus" class="audio-button focus-button overlay-circle-button hide"></a>
-      </div>
-      <div class="left-focus-buttons-container focus-buttons-container">
-        <a id="back-button-focus" class="focus-button overlay-circle-button hide"></a>
-        <a id="reset-button-focus" class="focus-button overlay-circle-button hide"></a>
-      </div>
+      <aside id="folder-sidebar" aria-label="浏览文件夹">
+        <div class="sidebar-folders">
+          <button id="add-photo-folder" type="button" disabled><i data-icon="Plus"></i>添加文件夹</button>
+          <h2>文件夹</h2>
+          <nav id="photo-folder-list" aria-label="照片文件夹列表"></nav>
+          <p id="folder-library-status" role="status" aria-live="polite"></p>
+        </div>
+        <button id="sidebar-settings" title="设置（Ctrl+B 隐藏或显示侧边栏）" type="button" aria-haspopup="dialog" aria-controls="settings-dialog"><i data-icon="Settings"></i>设置</button>
+      </aside>
 
       <div id="grid-wrapper" class="grid-wrapper">
         <div id="grid-overlay"><div>Drop to select folder or add image to folder</div></div>
-        <div id="img-focus-wrapper" class="">
-          <div id="zoomPanHolder">
-            <img id="img-focus" src="">
-            <video autoplay loop id="video-focus">
-              <source src="">
-            </video>
-          </div>
+        <div id="img-focus-wrapper" aria-hidden="true">
+          <section id="photo-detail-dialog" role="dialog" aria-modal="true" aria-label="照片详细信息" tabindex="-1">
+            <div class="detail-body">
+              <div id="photo-preview-slot"><div id="photo-preview">
+                <div id="zoomPanHolder"><img id="img-focus" alt="照片原图"></div>
+                <video autoplay loop controls id="video-focus"><source></video>
+              </div></div>
+              <aside id="photo-metadata" aria-label="照片源数据" aria-live="polite"></aside>
+            </div>
+          </section>
         </div>
         <div class="grid" id="imageGrid">
       </div>
+      <div id="gallery-pagination">
+        <p id="gallery-status" role="status" aria-live="polite"></p>
+        <button id="load-more-images" type="button" hidden>加载下 20 项</button>
+      </div>
   </div>
   
-  <div id="done-pop-up" class="pop-up">
-      <p>Done</p>
-      <div class="check topBtn"></div>
-  </div>
+  <div id="scroll-boundary-hint" role="status" aria-live="polite" aria-atomic="true"></div>
   <div id="copy-pop-up" class="pop-up">
       <p>Copied "<span id="copied-url"></span>"</p>
-      <div class="check topBtn"></div>
+      <i data-icon="Check" class="copy-check"></i>
   </div>
   
   <div id="no-items-text">
-      <p>No valid files in folder: '<span id="folder-path"></span>'</p>
+      <p><span id="no-items-message">请添加文件夹开始浏览。</span><span id="folder-path"></span></p>
   </div>
   
+  <div id="settings-overlay" aria-hidden="true">
+    <section id="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1">
+      <header class="detail-header">
+        <h2 id="settings-title">设置</h2>
+        <button id="close-settings" type="button" aria-label="关闭设置"><i data-icon="X"></i></button>
+      </header>
+      <div class="settings-layout">
+        <nav class="settings-tabs" role="tablist" aria-label="设置分类" aria-orientation="vertical">
+          <button id="appearance-tab" type="button" role="tab" aria-selected="true" aria-controls="appearance-panel"><i data-icon="Palette"></i>外观</button>
+          <button id="storage-tab" type="button" role="tab" aria-selected="false" aria-controls="storage-panel" tabindex="-1"><i data-icon="HardDrive"></i>存储</button>
+        </nav>
+        <div class="settings-content">
+          <section id="appearance-panel" role="tabpanel" aria-labelledby="appearance-tab">
+            <h3>外观</h3>
+            <p class="settings-description">选择你喜欢的窗口颜色，让整个应用呈现一致的色调。</p>
+            <div class="settings-section">
+              <h4>窗口颜色</h4>
+              <div id="theme-presets" role="group" aria-label="窗口颜色预设"></div>
+              <button id="reset-background-color" class="settings-action" type="button" disabled>恢复默认黑色</button>
+              <p id="settings-status" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+          <section id="storage-panel" role="tabpanel" aria-labelledby="storage-tab" hidden>
+            <h3>存储</h3>
+            <p class="settings-description">管理应用在本机保存的缩略图缓存。</p>
+            <div class="settings-section storage-card">
+              <h4>缩略图缓存</h4>
+              <p class="settings-description">清理后会在浏览照片时自动重新生成，原始照片和文件夹不受影响。</p>
+              <dl class="cache-summary"><div><dt>占用空间</dt><dd id="cache-size">正在读取…</dd></div><div><dt>缩略图数量</dt><dd id="cache-count">—</dd></div></dl>
+              <button id="clear-thumbnail-cache" class="settings-action" type="button" disabled><i data-icon="Trash2"></i><span>删除缩略图缓存</span></button>
+              <p id="storage-status" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </div>
+
   <!-- Include the Masonry Layout JavaScript -->
   <script src="../node_modules/masonry-layout/dist/masonry.pkgd.min.js"></script>
   <script src="../node_modules/panzoom/dist/panzoom.min.js"></script>
   <!-- Initialize Masonry Layout -->
   
+  <script src="../shared/theme.js"></script>
+  <script src="../node_modules/lucide/dist/umd/lucide.min.js"></script>
+  <script src="js/icons.js"></script>
   <script src="js/renderer-vars.js"></script>
   <script src="js/renderer.js"></script>
+  <script src="js/folders.js"></script>
+  <script src="js/settings.js"></script>
   <script src="js/window-listeners.js"></script>
   <script src="js/mouse-controls.js"></script>
   <script src="js/fullscreen-handler.js"></script>
@@ -80,6 +122,7 @@
   <script src="js/flash-copied.js"></script>
   <script src="js/appFunctions.js"></script>
   <script src="js/sorting-functions.js"></script>
+  <script src="js/sidebar.js"></script>
   <script src="js/loading-icon.js"></script>
 </body>
 </html>
