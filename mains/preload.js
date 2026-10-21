@@ -1,10 +1,13 @@
 // preload.js
 const { contextBridge, ipcRenderer } = require('electron');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 
 contextBridge.exposeInMainWorld('ipcRenderer', ipcRenderer);
 contextBridge.exposeInMainWorld('fs', fs);
 contextBridge.exposeInMainWorld('electronAPI', {
+  fileUrl: (filePath) => pathToFileURL(filePath).href,
+  getImageThumbnail: (filePath) => ipcRenderer.invoke('get-image-thumbnail', filePath),
   onSortUpdate: (callback) => ipcRenderer.on('sort-update', callback), // Forwards 'sort-update' event from main.js to renderer.js onSortUpdate
   onFlashCopied: (callback) => ipcRenderer.on('flash-copied', callback), // Forwards 'flash-copied' event from main.js to renderer.js onFlashCopied
   onFileAdded: (callback) => ipcRenderer.on('added-file', callback), // Forwards 'added-file' event from main.js to renderer.js onFileAdded

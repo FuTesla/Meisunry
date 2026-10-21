@@ -1,2 +1,7 @@
 /dist/
 /node_modules/
+/.vs/
+/appdata.json
+/thumbnail-cache/
+/userData/
+/release-qa/

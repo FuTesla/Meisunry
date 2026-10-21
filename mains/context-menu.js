@@ -6,11 +6,18 @@ let trash;
 import('trash').then((trashModule) => { trash = trashModule.default || trashModule; });
 
 contextMenu({
+  labels: {
+    learnSpelling: '记住此拼写', lookUpSelection: '查询“{selection}”', searchWithGoogle: '使用 Google 搜索',
+    cut: '剪切', copy: '复制', paste: '粘贴', selectAll: '全选',
+    saveImage: '保存图片', saveImageAs: '图片另存为…', copyImage: '复制图片', copyImageAddress: '复制图片地址',
+    saveVideo: '保存视频', saveVideoAs: '视频另存为…', copyVideoAddress: '复制视频地址',
+    copyLink: '复制链接', saveLinkAs: '链接另存为…', inspect: '检查元素', services: '服务'
+  },
   prepend: (defaultActions, parameters, browserWindow) => { 
     const hasImage = !(parameters.srcURL === null || parameters.srcURL === '');
   return [
   {
-    label: 'Sort By',
+    label: '排序方式',
     type: 'submenu',
     submenu: [
     {
@@ -19,7 +26,7 @@ contextMenu({
         saveAppData();
         browserWindow.webContents.send('sort-update'); 
       },
-      label: 'Newest',
+      label: '最新优先',
       type: 'checkbox',
       checked: global.preferencesData.sortMode == 'newest',
     },
@@ -29,7 +36,7 @@ contextMenu({
         saveAppData();
         browserWindow.webContents.send('sort-update'); 
       },
-      label: 'Oldest',
+      label: '最早优先',
       type: 'checkbox',
       checked: global.preferencesData.sortMode == 'oldest',
     },
@@ -39,7 +46,7 @@ contextMenu({
         saveAppData();
         browserWindow.webContents.send('sort-update'); 
       },
-      label: 'Name A->Z',
+      label: '名称升序（A → Z）',
       type: 'checkbox',
       checked: global.preferencesData.sortMode == 'name-a',
     },
@@ -49,7 +56,7 @@ contextMenu({
         saveAppData();
         browserWindow.webContents.send('sort-update'); 
       },
-      label: 'Name Z->A',
+      label: '名称降序（Z → A）',
       type: 'checkbox',
       checked: global.preferencesData.sortMode == 'name-z',
     },
@@ -59,7 +66,7 @@ contextMenu({
         saveAppData();
         browserWindow.webContents.send('sort-update'); 
       },
-      label: 'Type A->Z',
+      label: '类型升序（A → Z）',
       type: 'checkbox',
       checked: global.preferencesData.sortMode == 'type-a',
     },
@@ -69,7 +76,7 @@ contextMenu({
         saveAppData();
         browserWindow.webContents.send('sort-update'); 
       },
-      label: 'Type Z->A',
+      label: '类型降序（Z → A）',
       type: 'checkbox',
       checked: global.preferencesData.sortMode == 'type-z',
     },
@@ -79,7 +86,7 @@ contextMenu({
         saveAppData();
         browserWindow.webContents.send('sort-update'); 
       },
-      label: 'Random',
+      label: '随机排序',
       type: 'checkbox',
       checked: global.preferencesData.sortMode == 'random',
     },
@@ -87,7 +94,7 @@ contextMenu({
   },
 
   {
-    label: `Set Recursion Depth`,
+    label: `子文件夹浏览深度`,
     type: 'submenu',
     submenu: [
       {
@@ -96,7 +103,7 @@ contextMenu({
           saveAppData();
           refreshGrid(browserWindow);
         },
-        label: 'No recursion',
+        label: '仅当前文件夹',
         type: 'checkbox',
         checked: global.preferencesData.recursion == 0,
       },
@@ -106,7 +113,7 @@ contextMenu({
           saveAppData();
           refreshGrid(browserWindow);
         },
-        label: '1 Folder Deep',
+        label: '包含 1 层子文件夹',
         type: 'checkbox',
         checked: global.preferencesData.recursion == 1,
       },
@@ -116,7 +123,7 @@ contextMenu({
           saveAppData();
           refreshGrid(browserWindow);
         },
-        label: '2 Folders Deep',
+        label: '包含 2 层子文件夹',
         type: 'checkbox',
         checked: global.preferencesData.recursion == 2,
       },
@@ -126,7 +133,7 @@ contextMenu({
           saveAppData();
           refreshGrid(browserWindow);
         },
-        label: '3 Folders Deep',
+        label: '包含 3 层子文件夹',
         type: 'checkbox',
         checked: global.preferencesData.recursion == 3,
       },
@@ -136,7 +143,7 @@ contextMenu({
           saveAppData();
           refreshGrid(browserWindow);
         },
-        label: '4 Folders Deep',
+        label: '包含 4 层子文件夹',
         type: 'checkbox',
         checked: global.preferencesData.recursion == 4,
       },
@@ -146,7 +153,7 @@ contextMenu({
           saveAppData();
           refreshGrid(browserWindow);
         },
-        label: '5 Folders Deep',
+        label: '包含 5 层子文件夹',
         type: 'checkbox',
         checked: global.preferencesData.recursion == 5,
       },
@@ -156,7 +163,7 @@ contextMenu({
           saveAppData();
           refreshGrid(browserWindow);
         },
-        label: '6 Folders Deep',
+        label: '包含 6 层子文件夹',
         type: 'checkbox',
         checked: global.preferencesData.recursion == 6,
       },
@@ -166,7 +173,7 @@ contextMenu({
           saveAppData();
           refreshGrid(browserWindow);
         },
-        label: '7 Folders Deep',
+        label: '包含 7 层子文件夹',
         type: 'checkbox',
         checked: global.preferencesData.recursion == 7,
       },
@@ -176,14 +183,14 @@ contextMenu({
           saveAppData();
           refreshGrid(browserWindow);
         },
-        label: '8 Folders Deep',
+        label: '包含 8 层子文件夹',
         type: 'checkbox',
         checked: global.preferencesData.recursion == 8,
       },
     ]
   },
   {
-    label: `Set Allowed Files`,
+    label: `显示的文件类型`,
     type: 'submenu',
     submenu: [
       {
@@ -192,7 +199,7 @@ contextMenu({
           saveAppData();
           refreshGrid(browserWindow);
         },
-        label: 'Allow Images',
+        label: '显示图片',
         type: 'checkbox',
         checked: !global.preferencesData.DisableImages,
       },
@@ -202,14 +209,14 @@ contextMenu({
           saveAppData();
           refreshGrid(browserWindow);
         },
-        label: 'Allow Videos',
+        label: '显示视频',
         type: 'checkbox',
         checked: !global.preferencesData.DisableVideos,
       },
     ]
   },
   {
-    label: `Load Speed`,
+    label: `加载速度`,
     type: 'submenu',
 
     submenu: [
@@ -220,7 +227,7 @@ contextMenu({
           saveAppData();
           browserWindow.webContents.send('preference-update');
         },
-        label: "Fastest",
+        label: "最快",
         type: "checkbox",
         checked: global.preferencesData.loadSpeed == 'fastest',
       },
@@ -230,7 +237,7 @@ contextMenu({
           saveAppData();
           browserWindow.webContents.send('preference-update');
         },
-        label: "Fast",
+        label: "快",
         type: "checkbox",
         checked: global.preferencesData.loadSpeed == 'fast',
       },
@@ -240,7 +247,7 @@ contextMenu({
           saveAppData();
           browserWindow.webContents.send('preference-update');
         },
-        label: "Medium",
+        label: "中等",
         type: "checkbox",
         checked: global.preferencesData.loadSpeed == 'medium',
       },
@@ -250,19 +257,19 @@ contextMenu({
           saveAppData();
           browserWindow.webContents.send('preference-update');
         },
-        label: "Slow",
+        label: "慢",
         type: "checkbox",
         checked: global.preferencesData.loadSpeed == 'slow',
       },
     ]
   },
   {
-    label: `Choose Folder...`,
+    label: `选择文件夹…`,
     // Only show it when right-clicking text
     type: 'checkbox',
     click: () => {
       const options = {
-        title: 'Select a Folder',
+        title: '选择文件夹',
         properties: ['openDirectory'],
         defaultPath: global.preferencesData.folderLocation, // Format must be... `C:\\Grimm Tales\\`
       };
@@ -280,7 +287,7 @@ contextMenu({
     }
   },
   {
-    label: `Copy Image Path`,
+    label: `复制图片路径`,
     visible: hasImage,
     type: 'checkbox',
     click: () => {
@@ -291,7 +298,7 @@ contextMenu({
     }
   },
   {
-    label: `Delete Image`,
+    label: `删除图片`,
     visible: hasImage,
     type: 'checkbox',
     click: () => {
@@ -312,7 +319,7 @@ contextMenu({
     }
   },
   {
-    label: `Refresh`,
+    label: `刷新`,
     type: 'checkbox',
     click: () => {
       refreshGrid(browserWindow);

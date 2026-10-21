@@ -1,19 +1,23 @@
 {
   "name": "Meisunry",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "A masonry image viewer",
   "main": "./mains/main.js",
   "scripts": {
-    "start": "electron ./mains/main.js"
+    "start": "electron ./mains/main.js",
+    "dist:win": "node scripts/prepare-release.cjs && electron-builder --projectDir dist/release-source --config.directories.output=.. --win nsis zip --x64 --publish never",
+    "verify:release": "node scripts/verify-release.cjs"
   },
   "author": "Jonah Grimm",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^26.1.0",
+    "electron": "26.1.0",
     "electron-builder": "^24.6.3"
   },
   "dependencies": {
     "electron-context-menu": "^3.6.1",
+    "exifr": "^7.1.3",
+    "lucide": "^1.60.0",
     "masonry-layout": "^4.2.2",
     "panzoom": "^9.4.3",
     "trash": "^8.1.1"
@@ -34,9 +38,40 @@
     ]
   },
   "build": {
+    "appId": "com.futesla.meisunry",
+    "productName": "Meisunry",
+    "artifactName": "${productName}-${version}-win-${arch}.${ext}",
+    "files": [
+      "mains/**/*.js",
+      "renderers/**/*.js",
+      "renderers/**/*.html",
+      "renderers/**/*.css",
+      "shared/**/*.js",
+      "app-icons/**/*",
+      "!app-icons/demo.gif",
+      "!app-icons/MeisunryKey.png",
+      "!app-icons/commandKey.png",
+      "!app-icons/Success.png",
+      "LICENSE",
+      "!**/appdata.json",
+      "!**/thumbnail-cache{,/**}",
+      "!**/Local Storage{,/**}",
+      "!**/Session Storage{,/**}",
+      "!**/*.log"
+    ],
     "win": {
-      "icon": "/app-icons/logo.ico"
+      "icon": "app-icons/logo.ico",
+      "target": ["nsis", "zip"]
     },
-    "asar": false
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "asar": true
+  },
+  "allowScripts": {
+    "electron": true
   }
 }

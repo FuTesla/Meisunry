@@ -1,59 +1,23 @@
 // Set up preferences data
 let preferencesData;
 window.electronAPI.onPreferenceUpdate(() => {
-  ipcRend.invoke('loadAppData').then(data => { preferencesData = data; });
+  ipcRend.invoke('loadAppData').then(data => { preferencesData = data; applyAppBackground(data.backgroundColor); });
 });
 function updatePreferencesData(callback) {
-  ipcRend.invoke('loadAppData').then(data => { preferencesData = data; callback(); });
+  ipcRend.invoke('loadAppData').then(data => { preferencesData = data; applyAppBackground(data.backgroundColor); callback(); });
 }
 updatePreferencesData(setupImagesInGrid);
 
 
 window.electronAPI.onRefreshGrid(() => {
-  /* Refresh grid */
-  console.log('Refreshing grid');
-  ipcRend.invoke('readFilesFromDisk', preferencesData.folderLocation).then(b => {
-
-    // Add newly added items
-    let itemsNotInAllFiles = b.filter(itemB => 
-      !allFiles.some(itemA => itemA.fullPath === itemB.fullPath)
-    );
-    allFiles = allFiles.concat(itemsNotInAllFiles);
-
-
-    // Remove deleted items
-    let itemsMissingFromFiles = allFiles.filter(itemA => 
-      !b.some(itemB => itemB.fullPath === itemA.fullPath)
-    );
-    itemsMissingFromFiles.forEach (item => {
-      removeFromGrid(item.fullPath, true);
-    });
-
-    let time = 100;
-    if (itemsMissingFromFiles.length > 0) time = 510;
-    // We want to update the grid all at once rather then queue it a million times
-    new Promise((resolve) => setTimeout(() => { 
-      allFiles = resort(allFiles);
-      handle_resort(allFiles);
-      refreshGridLayout();
-    }, time));
-
-    updateHeaderCounter();
-    // Trigger load images call
-    loadImages(itemsNotInAllFiles);
-    resortAfterImageLoad = true;
-  });
+  ipcRend.invoke('readFilesFromDisk', preferencesData.folderLocation)
+    .then(files => resetGallery(files))
+    .catch(error => console.error('Error refreshing image folder:', error));
 });
 
-
-window.electronAPI.onSortUpdate((event, value) => {
-  console.log('sort update');
-  updatePreferencesData(() => { 
-    allFiles = resort(allFiles);
-    handle_resort(allFiles);
-    resortAfterImageLoad = true;
-  });
-})
+window.electronAPI.onSortUpdate(() => {
+  updatePreferencesData(() => resetGallery(allFiles));
+});
 
 window.electronAPI.onFileDeleted((event, deletedFilePath) => {
   /* Fix file path */
@@ -69,29 +33,35 @@ function removeFromGrid(deletedFilePath, dontRefreshGrid)
 {
   /* Reduce files list */
   allFiles = allFiles.filter(file => file.fullPath !== deletedFilePath);
+  pendingFiles = pendingFiles.filter(file => file.fullPath !== deletedFilePath);
+  updateHeaderCounter();
   let deletedFile = document.getElementById(deletedFilePath);
+  if (!deletedFile) {
+    updateGalleryFooter();
+    return;
+  }
   if (deletedFile.tagName === "SOURCE") deletedFile = deletedFile.parentNode
   deletedFile.classList.add(`hide`);
 
   new Promise((resolve) => setTimeout(() => { 
-    imageGrid.removeChild(deletedFile.parentNode); 
+    const item = deletedFile.closest('.grid-item');
+    if (!item || item.parentNode !== imageGrid) return;
+    item.cancelled = true;
+    if (item.cancelMediaLoad) item.cancelMediaLoad();
+    imageGrid.removeChild(item);
     if (!dontRefreshGrid) refreshGridLayout();
+    updateGalleryFooter();
   }, 500));
 }
 
 window.electronAPI.onFileAdded((event, newFile) => {
-  /* Add to files list */
-  allFiles.push(newFile);
-  /* Append */
-  addImage(newFile);
-  /* Resort */
-  allFiles = resort(allFiles);
-  handle_resort(allFiles);
-})
+  if (allFiles.some(file => file.fullPath === newFile.fullPath)) return;
+  resetGallery([...allFiles, newFile]);
+});
 
 window.addEventListener('resize', function(event) {
   updateGridAndSpacing();
   if (is_an_image_focused()) resetPanZoom(focusImg.naturalWidth, focusImg.naturalHeight);
   // Trigger Masonry Layout's layout after changing the CSS property
-  grid.layout();
+  if (grid) grid.layout();
 }, true);
